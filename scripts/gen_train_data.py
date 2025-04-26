@@ -4,8 +4,11 @@ from pathlib import Path
 from tire_env.dataclasses import TireInfo
 from tire_env.base import TireWorld
 from tire_env.grid_util import Grid2D, calculate_all_safe_placements
+from omegaconf import OmegaConf
 from dataclasses import dataclass
 import uuid
+import ray
+from tqdm import tqdm
 
 @dataclass
 class OccPlacementPair:
@@ -96,7 +99,9 @@ def generate_data(env:TireWorld, num_tires=8, max_retry=10):
             continue
         stable_actions.append(tire_pose)
     stable_actions = np.array(stable_actions)
-
+    if len(stable_actions) == 0:
+        return None
+    
     theta = stable_actions[:, 2]
     theta[np.pi/2 < theta] -= np.pi
     theta[theta<-np.pi/2] += np.pi
@@ -111,15 +116,17 @@ def generate_data(env:TireWorld, num_tires=8, max_retry=10):
     #     tire.set_tire_pose(tire_pose)
     #     env.world.wait_to_stablize(tol=0.05)
     
-    return occ, placements
+    return OccPlacementPair(occ, placements)
 
 
-def main(save_dir:str, num_max_tires:int, num_data:int=1000):
+def main(save_dir:str, num_max_tires:int, num_data:int=1000, gui=False):
     save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
 
     with initialize(config_path="../config", version_base=None):
         cfg = compose(config_name="env_config")
+    OmegaConf.set_readonly(cfg, False)
+    cfg['gui'] = gui
 
     tire_info_paths = list(Path("./data/tires/").glob("*/tire_info.yaml"))
     tire_infos = [TireInfo.load(path) for path in tire_info_paths]
@@ -129,12 +136,17 @@ def main(save_dir:str, num_max_tires:int, num_data:int=1000):
     env = TireWorld(**cfg)
     env.set_tire_sequence([target_tire_info] * num_max_tires)
     
-    for _ in range(num_data):
+    pbar = tqdm(range(num_data), total=num_data)
+    for _ in pbar:
         num_tires = np.random.randint(0, num_max_tires-1)
-        occ, placements = generate_data(env, num_tires)
-        pair = OccPlacementPair(occ, placements)
-        save_path = save_dir / f"{uuid.uuid4().hex}.npz"
-        pair.save(save_path)
+        pair = generate_data(env, num_tires)
+        if pair is not None:
+            save_path = save_dir / f"{uuid.uuid4().hex}.npz"
+            pair.save(save_path)
+
+@ray.remote
+def main_parallel(save_dir:str, num_max_tires:int, num_data:int=1000, gui=False):
+    main(save_dir, num_max_tires, num_data, gui)
 
 if __name__ == "__main__":
     import argparse
@@ -142,9 +154,31 @@ if __name__ == "__main__":
     parser.add_argument("--save_dir", type=str)
     parser.add_argument("--num_max_tires", type=int, default=12)
     parser.add_argument("--num_data", type=int, default=100)
+    parser.add_argument("--gui", type=bool, default=False)
+    parser.add_argument("--num_cores", type=int, default=0)
     args = parser.parse_args()
-    main(
-        save_dir=args.save_dir, 
-        num_max_tires=args.num_max_tires,
-        num_data=args.num_data
-    )
+    
+    if args.num_cores > 1:
+        # use ray
+        num_data_per_core = [args.num_data // args.num_cores] * args.num_cores
+        num_data_per_core[-1] += args.num_data % args.num_cores
+
+        context = ray.init(num_cpus=args.num_cores)
+        print(f"dashboard: {context.dashboard_url}")
+        print(ray.available_resources())
+
+    if args.num_cores > 1:
+        ray.get([main_parallel.remote(
+            save_dir=args.save_dir, 
+            num_max_tires=args.num_max_tires,
+            num_data=num_data,
+            gui=args.gui
+        ) for num_data in num_data_per_core])
+    
+    else:
+        main(
+            save_dir=args.save_dir, 
+            num_max_tires=args.num_max_tires,
+            num_data=args.num_data,
+            gui=args.gui
+        )
