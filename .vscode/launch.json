@@ -1,0 +1,39 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python Debugger: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "gen_train_data",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "scripts/gen_train_data.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--save_dir",
+                "./data/train_data"
+            ]
+        },
+        {
+            "name": "tire_mesh_gen",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "scripts/tire_mesh_gen.py",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Run tire_env.base",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "tire_env.base"
+        }
+    ]
+}

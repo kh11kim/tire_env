@@ -1,0 +1,21 @@
+gui: True
+x_bound: [-1.121, 1.121]
+height: 4.0
+num_initial_tires: 4
+y_tol: 0.1
+
+simulation_config:
+  lateralFriction: 1.0
+  rollingFriction: 0.001
+  spinningFriction: 0.001
+
+cam_config:
+  depth_camera_1:
+    pos : [0.0, -2.4, 1.82857]
+    rpy: [0,90,90]
+    width: 1280
+    height: 720
+    fx: 663.0375189720448
+    fy: 663.0375189720448
+    cx: 640
+    cy: 360
