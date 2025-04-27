@@ -78,7 +78,19 @@ def generate_data(env:TireWorld, num_tires=8, max_retry=10):
     tire = env.load_tire()
     env.save_tire_state()
     
-    stable_actions = []
+    def get_stable_placement(tire_pose, tire_post_pose):
+        # check if placement is valid
+        theta_err = abs(tire_pose_post[2] - tire_pose[2])
+        xy_err = np.linalg.norm(tire_pose_post[:2] - tire_pose[:2])
+        if theta_err > np.pi/8 or xy_err > 0.1:
+            tire_pose_post[1] += 0.05
+            tire.set_tire_pose(tire_pose_post)
+            if tire.is_in_collision():
+                return None
+            return tire_pose_post
+        return tire_pose
+
+    stable_poses = []
     for tire_pose in cands[:50]:
         env.restore_tire_state()
         tire.set_tire_pose(tire_pose)
@@ -89,32 +101,34 @@ def generate_data(env:TireWorld, num_tires=8, max_retry=10):
             continue
         # check if placement is valid
         tire_pose_post = tire.get_tire_pose()
-        theta_err = abs(tire_pose_post[2] - tire_pose[2])
-        xy_err = np.linalg.norm(tire_pose_post[:2] - tire_pose[:2])
-        if theta_err > np.pi/8 or xy_err > 0.1:
-            tire_pose_post[1] += 0.05
-            tire.set_tire_pose(tire_pose_post)
-            if not tire.is_in_collision():
-                stable_actions.append(tire_pose_post)
+        stable_pose = get_stable_placement(tire_pose, tire_pose_post)
+        if stable_pose is None:
             continue
-        stable_actions.append(tire_pose)
-    stable_actions = np.array(stable_actions)
-    if len(stable_actions) == 0:
+        stable_poses.append(stable_pose)
+    stable_poses = np.array(stable_poses)
+    if len(stable_poses) == 0:
         return None
     
-    theta = stable_actions[:, 2]
+    # stability check
+    real_stable_poses = []
+    for tire_pose in stable_poses:
+        env.restore_tire_state()
+        tire.set_tire_pose(tire_pose)
+        env.world.wait_to_stablize(tol=0.05)
+        tire_pose_post = tire.get_tire_pose()
+        stable_pose = get_stable_placement(tire_pose, tire_pose_post)
+        if stable_pose is None: continue
+        real_stable_poses.append(stable_pose)
+    stable_poses = np.array(real_stable_poses)
+    
+    theta = stable_poses[:, 2]
     theta[np.pi/2 < theta] -= np.pi
     theta[theta<-np.pi/2] += np.pi
     theta_res = np.pi / 15
     theta_indices = ((theta + np.pi/2) / theta_res).astype(int)
     theta_indices = np.clip(theta_indices, 0, action_space_res[2]-1)
-    xy_indices = xy_grid.point_to_index(stable_actions[:, :2], is_int=True)
+    xy_indices = xy_grid.point_to_index(stable_poses[:, :2], is_int=True)
     placements[xy_indices[:,1], xy_indices[:,0], theta_indices] = 1 # feasible
-    
-    # check
-    # for tire_pose in stable_actions:
-    #     tire.set_tire_pose(tire_pose)
-    #     env.world.wait_to_stablize(tol=0.05)
     
     return OccPlacementPair(occ, placements)
 
