@@ -29,7 +29,7 @@ class OccPlacementPair:
 
 action_space_res = [45, 80, 15]
 
-def generate_data(env:TireWorld, num_tires=8, max_retry=10):
+def generate_data(env:TireWorld, num_tires=8, max_retry=20):
     assert env.tire_seq_list is not None
     
     env.reset()
