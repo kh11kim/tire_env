@@ -1,5 +1,14 @@
 import numpy as np
 from scipy.optimize import fsolve
+from pathlib import Path
+from tire_env.dataclasses import TireInfo
+
+def get_tire_info_dict(tire_dir:Path):
+    tire_dir = Path(tire_dir)
+    tire_info_paths = list(tire_dir.glob("*/tire_info.yaml"))
+    tire_infos = [TireInfo.load(path) for path in tire_info_paths]
+    tire_info_dict = {tire_info.name: tire_info for tire_info in tire_infos}
+    return tire_info_dict
 
 def tire_pose_gen(rad, wid, tire_num, overlap_const=0.5, case_width=1.121):
     """

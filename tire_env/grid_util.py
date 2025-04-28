@@ -3,7 +3,6 @@ import numpy as np
 from .dataclasses import TireInfo
 from scipy.ndimage import binary_dilation
 import matplotlib.pyplot as plt
-#PIXEL_SIZE = 0.025
 
 def create_tire_grid(tire_info: TireInfo, theta:float, pixel_size):
     w = tire_info.outer_radius*2

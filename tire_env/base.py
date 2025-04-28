@@ -74,7 +74,7 @@ class TireWorld:
         sizes = self.bounds[:, 1] - self.bounds[:, 0]
         resolutions = sizes / pixel_size
         center = self.bounds.mean(axis=1)
-        resolutions = resolutions.astype(int)
+        self.resolutions = resolutions.astype(int)
         self.grid = Grid2D(sizes, resolutions, center)
         
         self.cameras:dict[str, eb.Camera] = None
@@ -307,7 +307,9 @@ class TireWorld:
                 return True
         return False
     
-    def calculate_safe_placement(self, occ, tire_info, x, theta):
+    def calculate_safe_placement(self, occ, tire_info, x, theta, pixel_offset=0):
+        if occ.ndim == 3:
+            occ = occ[0]
         tire_grid, center = create_tire_grid(tire_info, theta, self.grid.pixel_size)
         expanded_occ = binary_dilation(occ, structure=tire_grid)
         x_index = self.grid.point_to_index([[x, 0]], is_int=True)[0][0]
@@ -316,7 +318,7 @@ class TireWorld:
         if len(cols_with_occ) == 0:
             y = 0.
         else:
-            y_index = cols_with_occ.min() - 1
+            y_index = cols_with_occ.min() - 1 - pixel_offset
             points = np.array([[x_index, y_index]]).astype(int)
             y = self.grid.index_to_point(points)[0][1]
         return np.array([x, y, theta])
