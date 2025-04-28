@@ -2,7 +2,7 @@ import numpy as np
 from hydra import compose, initialize
 from pathlib import Path
 from tire_env.dataclasses import TireInfo
-from tire_env.base import TireWorld, Tire
+from tire_env.base import TireWorld
 from tire_env.grid_util import Grid2D, calculate_all_safe_placements
 from omegaconf import OmegaConf
 from dataclasses import dataclass
@@ -18,9 +18,9 @@ class OccPlacementPair:
 
     def save(self, path: str):
         data = {
-            "occ": self.occ,
-            "placements": self.placements,
-            "valid": self.valid
+            "occ": self.occ.astype(bool),
+            "placements": self.placements.astype(bool),
+            "valid": self.valid.astype(bool)
         }
         np.savez_compressed(path, **data)
     
@@ -135,14 +135,17 @@ def get_stable_placements(env:TireWorld, xy_grid:Grid2D, theta_grid:np.ndarray, 
     for pose in [stable_poses, infeasible_poses, cands]:
         if len(pose) == 0:
             poses.append(None)
-        poses.append(np.array(pose))
+        else:
+            poses.append(np.array(pose))
     return poses
 
 def get_data(occ, stable_poses, infeasible_poses, cands, xy_grid:Grid2D, theta_grid_res:tuple):
     resolution = (xy_grid.res[1], xy_grid.res[0], theta_grid_res)
+    # default: known, not placable
     placements = np.zeros(resolution).astype(bool) # y, x, theta
-    
     known_mask = np.ones(resolution).astype(bool) # y, x, theta
+    
+    # candidate poses are unknown
     indices = xy_grid.point_to_index(cands[:, :2], is_int=True)
     known_mask[indices[:,1], indices[:,0]] = False # unknown
     
@@ -156,13 +159,17 @@ def get_data(occ, stable_poses, infeasible_poses, cands, xy_grid:Grid2D, theta_g
         theta_indices = ((theta + np.pi/2) / theta_grid_size).astype(int)
         xy_indices = xy_grid.point_to_index(xy, is_int=True)
         return np.concatenate([xy_indices, theta_indices[:,np.newaxis]], -1) # x, y, theta
-        
-    indices = get_xyt_indices(stable_poses, resolution)
-    placements[indices[:,1], indices[:,0], indices[:,2]] = True # stable
-    known_mask[indices[:,1], indices[:,0], indices[:,2]] = True # known
+    
+    if stable_poses is not None:
+        # check stable poses as known, placeable
+        indices = get_xyt_indices(stable_poses, resolution)
+        placements[indices[:,1], indices[:,0], indices[:,2]] = True # stable
+        known_mask[indices[:,1], indices[:,0], indices[:,2]] = True # known
 
-    indices = get_xyt_indices(infeasible_poses, resolution)
-    known_mask[indices[:,1], indices[:,0], indices[:,2]] = True # known
+    if infeasible_poses is not None:
+        # check infeasible poses as known
+        indices = get_xyt_indices(infeasible_poses, resolution)
+        known_mask[indices[:,1], indices[:,0], indices[:,2]] = True # known
     
     return OccPlacementPair(occ=occ, placements=placements, valid=known_mask)
 
@@ -179,7 +186,7 @@ def generate_data(env:TireWorld, num_tires=8, theta_grid_res=15, verify=True):
     poses = get_stable_placements(env, xy_grid, theta_grid)
     stable, infeasible, cands = poses
     
-    if verify:
+    if verify and stable is not None:
         stable = validate_placement(stable, env)        
     
     data = get_data(
@@ -231,8 +238,14 @@ def main(
             pair.save(save_path)
 
 @ray.remote
-def main_parallel(save_dir:str, num_max_tires:int, num_data:int=1000, gui=False):
-    main(save_dir, num_max_tires, num_data, gui)
+def main_parallel(
+    save_dir:str, 
+    num_max_tires:int, 
+    theta_res:int=15,
+    num_data:int=1000, 
+    gui=False
+):
+    main(save_dir, num_max_tires, theta_res, num_data, gui)
 
 if __name__ == "__main__":
     import argparse
