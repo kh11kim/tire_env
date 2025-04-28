@@ -19,6 +19,7 @@
             "console": "integratedTerminal",
             "args": [
                 "--num_max_tires", "16",
+                "--gui",
                 "--save_dir",
                 "./data/train_data"
             ]

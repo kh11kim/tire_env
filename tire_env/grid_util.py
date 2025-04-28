@@ -31,6 +31,9 @@ def create_tire_grid(tire_info: TireInfo, theta:float, pixel_size):
 
 def calculate_all_safe_placements(
     grid: Grid2D, occ, tire_info, theta_grid):
+    if occ.ndim == 3:
+        occ = occ.squeeze(0)
+        
     placements = []
     for theta in theta_grid:
         tire_grid, center = create_tire_grid(
