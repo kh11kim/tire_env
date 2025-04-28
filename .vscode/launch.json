@@ -18,7 +18,6 @@
             "program": "scripts/gen_train_data.py",
             "console": "integratedTerminal",
             "args": [
-                "--gui", "True",
                 "--num_max_tires", "16",
                 "--save_dir",
                 "./data/train_data"
