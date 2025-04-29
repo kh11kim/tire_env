@@ -11,41 +11,18 @@ import ray
 from tqdm import tqdm
 
 @dataclass
-class OccPlacementPair:
-    occ: np.ndarray
-    placements: np.ndarray
-    valid: np.ndarray
-
-    def save(self, path: str):
-        data = {
-            "occ": self.occ.astype(bool),
-            "placements": self.placements.astype(bool),
-            "valid": self.valid.astype(bool)
-        }
-        np.savez_compressed(path, **data)
-    
-    @classmethod
-    def load(cls, path: str):
-        data = np.load(path)
-        return cls(
-            occ=data["occ"], 
-            placements=data["placements"],
-            valid=data["valid"]
-        )
-
-
-@dataclass
 class OccPlacementPairV2:
     occ: np.ndarray
-    cands: np.ndarray # x, theta
-    placements: np.ndarray # x, theta
-    valid: np.ndarray
+    placeable: np.ndarray # x, theta
+    stable: np.ndarray # x, theta
+    unstable: np.ndarray # x, theta
 
     def save(self, path: str):
         data = {
             "occ": self.occ.astype(bool),
-            "placements": self.placements.astype(bool),
-            "valid": self.valid.astype(bool)
+            "placeable": self.placeable.astype(bool),
+            "stable": self.stable.astype(bool),
+            "unstable": self.unstable.astype(bool)
         }
         np.savez_compressed(path, **data)
     
@@ -54,8 +31,9 @@ class OccPlacementPairV2:
         data = np.load(path)
         return cls(
             occ=data["occ"], 
-            placements=data["placements"],
-            valid=data["valid"]
+            placeable=data["placeable"],
+            stable=data["stable"],
+            unstable=data["unstable"]
         )
 
 action_theta_res = 15
@@ -166,12 +144,14 @@ def get_stable_placements(env:TireWorld, xy_grid:Grid2D, theta_grid:np.ndarray, 
 def get_data(occ, stable_poses, infeasible_poses, cands, xy_grid:Grid2D, theta_grid_res:tuple):
     resolution = (xy_grid.res[1], xy_grid.res[0], theta_grid_res)
     # default: known, not placable
-    placements = np.zeros(resolution).astype(bool) # y, x, theta
-    known_mask = np.ones(resolution).astype(bool) # y, x, theta
+    stable = np.zeros(resolution).astype(bool) # y, x, theta
+    unstable = np.zeros(resolution).astype(bool) # y, x, theta
+    #known_mask = np.ones(resolution).astype(bool) # y, x, theta
+    placeable = np.zeros(resolution).astype(bool)
     
     # candidate poses are unknown
-    indices = xy_grid.point_to_index(cands[:, :2], is_int=True)
-    known_mask[indices[:,1], indices[:,0]] = False # unknown
+    #indices = xy_grid.point_to_index(cands[:, :2], is_int=True)
+    #known_mask[indices[:,1], indices[:,0]] = False # unknown
     
     def get_xyt_indices(poses, resolution):
         theta_grid_size = np.pi / resolution[-1]
@@ -187,15 +167,27 @@ def get_data(occ, stable_poses, infeasible_poses, cands, xy_grid:Grid2D, theta_g
     if stable_poses is not None:
         # check stable poses as known, placeable
         indices = get_xyt_indices(stable_poses, resolution)
-        placements[indices[:,1], indices[:,0], indices[:,2]] = True # stable
-        known_mask[indices[:,1], indices[:,0], indices[:,2]] = True # known
+        stable[indices[:,1], indices[:,0], indices[:,2]] = True # stable
+        #known_mask[indices[:,1], indices[:,0], indices[:,2]] = True # known
 
     if infeasible_poses is not None:
         # check infeasible poses as known
         indices = get_xyt_indices(infeasible_poses, resolution)
-        known_mask[indices[:,1], indices[:,0], indices[:,2]] = True # known
+        unstable[indices[:,1], indices[:,0], indices[:,2]] = True # unstable
+        #known_mask[indices[:,1], indices[:,0], indices[:,2]] = True # known
     
-    return OccPlacementPair(occ=occ, placements=placements, valid=known_mask)
+    indices = get_xyt_indices(cands, resolution)
+    placeable[indices[:,1], indices[:,0], indices[:,2]] = True # placeable
+
+    stable = stable.argmax(0).astype(bool) # H, W, theta -> W, theta
+    unstable = unstable.argmax(0).astype(bool) # H, W, theta -> W, theta
+    placeable = placeable.argmax(0).astype(bool) # H, W, theta -> W, theta
+    return OccPlacementPairV2(
+        occ=occ, 
+        placeable=placeable,
+        stable=stable,
+        unstable=unstable,
+    )
 
 def generate_data(
     env:TireWorld, num_tires=8, theta_grid_res=15, verify=True,
