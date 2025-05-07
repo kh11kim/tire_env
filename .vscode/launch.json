@@ -15,7 +15,7 @@
             "name": "gen_train_data",
             "type": "debugpy",
             "request": "launch",
-            "program": "scripts/gen_train_data.py",
+            "program": "scripts/gen_train_data_v2.py",
             "console": "integratedTerminal",
             "args": [
                 "--num_max_tires", "16",

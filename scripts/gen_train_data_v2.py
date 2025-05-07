@@ -11,6 +11,18 @@ import ray
 from tqdm import tqdm
 
 @dataclass
+class Config:
+    save_dir: str
+    num_max_tires: int
+    num_data: int
+    theta_res: int
+    gui: bool
+    num_cores: int
+    num_trial: int
+    verify: bool # verify stable poses
+    only_placeable: bool
+
+@dataclass
 class OccPlacementPairV2:
     occ: np.ndarray
     placeable: np.ndarray # x, theta
@@ -141,17 +153,21 @@ def get_stable_placements(env:TireWorld, xy_grid:Grid2D, theta_grid:np.ndarray, 
             poses.append(np.array(pose))
     return poses
 
-def get_data(occ, stable_poses, infeasible_poses, cands, xy_grid:Grid2D, theta_grid_res:tuple):
+def get_data(
+    occ, 
+    stable_poses, 
+    infeasible_poses, 
+    cands, 
+    xy_grid:Grid2D, 
+    theta_grid_res:tuple,
+    check_placeable:bool = True
+):
     resolution = (xy_grid.res[1], xy_grid.res[0], theta_grid_res)
+    
     # default: known, not placable
     stable = np.zeros(resolution).astype(bool) # y, x, theta
     unstable = np.zeros(resolution).astype(bool) # y, x, theta
-    #known_mask = np.ones(resolution).astype(bool) # y, x, theta
     placeable = np.zeros(resolution).astype(bool)
-    
-    # candidate poses are unknown
-    #indices = xy_grid.point_to_index(cands[:, :2], is_int=True)
-    #known_mask[indices[:,1], indices[:,0]] = False # unknown
     
     def get_xyt_indices(poses, resolution):
         theta_grid_size = np.pi / resolution[-1]
@@ -168,20 +184,24 @@ def get_data(occ, stable_poses, infeasible_poses, cands, xy_grid:Grid2D, theta_g
         # check stable poses as known, placeable
         indices = get_xyt_indices(stable_poses, resolution)
         stable[indices[:,1], indices[:,0], indices[:,2]] = True # stable
-        #known_mask[indices[:,1], indices[:,0], indices[:,2]] = True # known
 
     if infeasible_poses is not None:
         # check infeasible poses as known
         indices = get_xyt_indices(infeasible_poses, resolution)
         unstable[indices[:,1], indices[:,0], indices[:,2]] = True # unstable
-        #known_mask[indices[:,1], indices[:,0], indices[:,2]] = True # known
     
     indices = get_xyt_indices(cands, resolution)
     placeable[indices[:,1], indices[:,0], indices[:,2]] = True # placeable
 
+    # remove z axis
     stable = stable.argmax(0).astype(bool) # H, W, theta -> W, theta
     unstable = unstable.argmax(0).astype(bool) # H, W, theta -> W, theta
     placeable = placeable.argmax(0).astype(bool) # H, W, theta -> W, theta
+    
+    if check_placeable:
+        stable = placeable & stable
+        unstable = placeable & unstable
+
     return OccPlacementPairV2(
         occ=occ, 
         placeable=placeable,
@@ -190,25 +210,26 @@ def get_data(occ, stable_poses, infeasible_poses, cands, xy_grid:Grid2D, theta_g
     )
 
 def generate_data(
-    env:TireWorld, num_tires=8, theta_grid_res=15, verify=True,
-    num_trial=100
-):
+    env:TireWorld, 
+    num_tires:int, 
+    config:Config
+) -> OccPlacementPairV2:
     assert env.tire_seq_list is not None
     
     xy_sizes = env.bounds[:, 1] - env.bounds[:, 0]
     xy_center = env.bounds.mean(axis=1)
     
     xy_grid = Grid2D(xy_sizes, env.resolutions, xy_center)
-    theta_grid = np.linspace(-np.pi/2, np.pi/2, theta_grid_res)
+    theta_grid = np.linspace(-np.pi/2, np.pi/2, config.theta_res)
     
     occ = make_scene(env, num_tires)
     poses = get_stable_placements(
         env, xy_grid, theta_grid,
-        num_trial=num_trial
+        num_trial=config.num_trial
     )
     stable, infeasible, cands = poses
     
-    if verify and stable is not None:
+    if config.verify and stable is not None:
         stable = validate_placement(stable, env)        
     
     data = get_data(
@@ -217,94 +238,83 @@ def generate_data(
         infeasible_poses=infeasible, 
         cands=cands,
         xy_grid=xy_grid, 
-        theta_grid_res=theta_grid_res)
+        theta_grid_res=config.theta_res,
+        check_placeable=config.only_placeable
+    )
     return data
     
     
 
 
-def main(
-    save_dir:str, 
-    num_max_tires:int, 
-    theta_res:int=15,
-    num_data:int=1000, 
-    num_trial:int=100,
-    gui=False
-):
-    save_dir = Path(save_dir)
+def main(cfg:Config):
+    save_dir = Path(cfg.save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
 
     with initialize(config_path="../config", version_base=None):
-        cfg = compose(config_name="env_config")
-    OmegaConf.set_readonly(cfg, False)
-    cfg['gui'] = gui
+        env_cfg = compose(config_name="env_config")
+        OmegaConf.set_readonly(env_cfg, False)
+        env_cfg['gui'] = cfg.gui
 
     tire_info_paths = list(Path("./data/tires/").glob("*/tire_info.yaml"))
     tire_infos = [TireInfo.load(path) for path in tire_info_paths]
     tire_info_dict = {tire_info.name: tire_info for tire_info in tire_infos}
     target_tire_info = tire_info_dict["600"]
 
-    env = TireWorld(**cfg)
-    env.set_tire_sequence([target_tire_info] * num_max_tires)
+    env = TireWorld(**env_cfg)
+    env.set_tire_sequence([target_tire_info] * cfg.num_max_tires)
     
-    pbar = tqdm(range(num_data), total=num_data)
+    pbar = tqdm(range(cfg.num_data), total=cfg.num_data)
     for _ in pbar:
-        num_tires = np.random.randint(0, num_max_tires-1)
+        num_tires = np.random.randint(0, cfg.num_max_tires-1)
         pair = generate_data(
             env=env, 
             num_tires=num_tires,
-            theta_grid_res=theta_res,
-            verify=True
+            config=cfg
         )
         if pair is not None:
             save_path = save_dir / f"{uuid.uuid4().hex}.npz"
             pair.save(save_path)
 
 @ray.remote
-def main_parallel(
-    save_dir:str, 
-    num_max_tires:int, 
-    theta_res:int=15,
-    num_data:int=1000, 
-    gui=False
-):
-    main(save_dir, num_max_tires, theta_res, num_data, gui)
+def main_parallel(cfg:Config):
+    main(cfg)
 
-if __name__ == "__main__":
+def parse_config() -> Config:
     import argparse
+    import pprint
     parser = argparse.ArgumentParser()
     parser.add_argument("--save_dir", type=str)
     parser.add_argument("--num_max_tires", type=int, default=16)
     parser.add_argument("--num_data", type=int, default=100)
     parser.add_argument("--theta_res", type=int, default=15)
-    parser.add_argument("--gui", action=argparse.BooleanOptionalAction,default=False)
+    parser.add_argument("--gui", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--num_cores", type=int, default=0)
     parser.add_argument("--num_trial", type=int, default=100)
+    parser.add_argument("--verify", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--only-placeable", action=argparse.BooleanOptionalAction, default=True)
     args = parser.parse_args()
-    
-    if args.num_cores > 1:
-        # use ray
-        num_data_per_core = [args.num_data // args.num_cores] * args.num_cores
-        num_data_per_core[-1] += args.num_data % args.num_cores
+    pprint.PrettyPrinter().pprint(vars(args))
+    return Config(**vars(args))
 
-        context = ray.init(num_cpus=args.num_cores)
+if __name__ == "__main__":
+    cfg = parse_config()
+    
+    if cfg.num_cores <= 1:
+        main(cfg)
+    else:
+        # use ray
+        num_data_per_core = cfg.num_data // cfg.num_cores
+        remainder = cfg.num_data % cfg.num_cores
+        split = [num_data_per_core + 1 
+            if i < remainder else num_data_per_core for i in range(cfg.num_cores)]
+
+        context = ray.init(num_cpus=cfg.num_cores)
         print(f"dashboard: {context.dashboard_url}")
         print(ray.available_resources())
 
-    if args.num_cores > 1:
-        ray.get([main_parallel.remote(
-            save_dir=args.save_dir, 
-            num_max_tires=args.num_max_tires,
-            theta_res=args.theta_res,
-            num_data=num_data,
-            gui=args.gui
-        ) for num_data in num_data_per_core])
-    
-    else:
-        main(
-            save_dir=args.save_dir, 
-            num_max_tires=args.num_max_tires,
-            theta_res=args.theta_res,
-            num_data=args.num_data,
-            gui=args.gui
-        )
+        jobs = []
+        for num_data in split:
+            cfg.gui = False
+            cfg.num_data = num_data
+            jobs.append(main_parallel.remote(cfg))
+        ray.get(jobs)

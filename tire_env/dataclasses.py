@@ -62,4 +62,29 @@ class TireInfo:
     @property
     def col_mesh_path(self):
         return self.get_mesh_path(col=True)
-     
+
+@dataclass
+class OccPlacementPairV2:
+    occ: np.ndarray
+    placeable: np.ndarray # x, theta
+    stable: np.ndarray # x, theta
+    unstable: np.ndarray # x, theta
+
+    def save(self, path: str):
+        data = {
+            "occ": self.occ.astype(bool),
+            "placeable": self.placeable.astype(bool),
+            "stable": self.stable.astype(bool),
+            "unstable": self.unstable.astype(bool)
+        }
+        np.savez_compressed(path, **data)
+    
+    @classmethod
+    def load(cls, path: str):
+        data = np.load(path)
+        return cls(
+            occ=data["occ"], 
+            placeable=data["placeable"],
+            stable=data["stable"],
+            unstable=data["unstable"]
+        )
